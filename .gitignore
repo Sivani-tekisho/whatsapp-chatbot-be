@@ -1,0 +1,30 @@
+# Root — monorepo-wide (see also backend/.gitignore and frontend/.gitignore)
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python (backend)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node (frontend)
+node_modules/
+dist/
+build/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Local / tooling
+.cursor/
+*.local
