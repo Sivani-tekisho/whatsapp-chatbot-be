@@ -31,7 +31,12 @@ class RAGService:
         client = db or self._db
         org_id = self._resolve_org_id(client) if self._provider == "supabase" else None
         chunks = self._retriever.retrieve(query, org_id, self._top_k)
-        return [c["chunk_text"] for c in chunks if c.get("chunk_text")]
+        min_score = self._settings.rag_min_similarity
+        return [
+            c["chunk_text"]
+            for c in chunks
+            if c.get("chunk_text") and float(c.get("similarity", 0)) >= min_score
+        ]
 
-    def has_relevant_context(self, chunks: list[str], min_similarity: float = 0.5) -> bool:
+    def has_relevant_context(self, chunks: list[str]) -> bool:
         return len(chunks) > 0

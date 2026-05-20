@@ -36,11 +36,19 @@ class CompanyAgent:
         fallback = org_settings.get(
             "fallback_message", "I couldn't find that information."
         )
-        if not context_chunks:
-            return fallback
+        company_name = org_settings.get("name", self._settings.company_name)
+
+        if not self._rag.has_relevant_context(context_chunks):
+            messages = self._prompts.build_no_rag_prompt(
+                company_name=company_name,
+                fallback_message=fallback,
+                user_message=user_message,
+                history=history,
+            )
+            return await self._llm.generate(messages)
 
         system_prompt = self._prompts.build_system_prompt(
-            company_name=org_settings.get("name", self._settings.company_name),
+            company_name=company_name,
             custom_prompt=org_settings.get("system_prompt"),
             fallback_message=fallback,
         )

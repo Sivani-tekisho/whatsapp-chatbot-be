@@ -10,6 +10,8 @@ from app.core.logging_config import wa_log
 from app.core.security import verify_webhook_signature
 from app.dependencies import get_message_processor
 from app.services.webhook_activity import log_event
+from app.services.webhook_dedup import is_duplicate_message
+from app.services.whatsapp_service import normalize_whatsapp_recipient
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["webhook"])
@@ -24,7 +26,10 @@ def _extract_incoming_message(body: dict) -> list[dict]:
                 if msg.get("type") != "text":
                     continue
                 text = msg.get("text", {}).get("body", "")
-                phone = msg.get("from", "")
+                try:
+                    phone = normalize_whatsapp_recipient(msg.get("from", ""))
+                except ValueError:
+                    continue
                 if phone and text:
                     messages.append(
                         {
@@ -73,7 +78,12 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         wa_log(logger, "INBOUND REJECTED", "Invalid APP_SECRET signature")
         raise HTTPException(status_code=403, detail="Invalid signature")
 
-    body = json.loads(raw_body)
+    try:
+        body = json.loads(raw_body)
+    except json.JSONDecodeError:
+        wa_log(logger, "INBOUND REJECTED", "Invalid JSON body")
+        return {"status": "ok"}
+
     if body.get("object") != "whatsapp_business_account":
         log_event("POST", f"Ignored object={body.get('object')}")
         wa_log(logger, "INBOUND IGNORED", f"Not WhatsApp payload (object={body.get('object')})")
@@ -92,12 +102,16 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
 
     processor = get_message_processor()
     for msg in incoming:
+        mid = msg.get("message_id")
+        if is_duplicate_message(mid):
+            wa_log(logger, "INBOUND SKIP", f"Duplicate message_id={mid}")
+            continue
         background_tasks.add_task(
             _process_message_safe,
             processor,
             msg["phone"],
             msg["text"],
-            msg.get("message_id"),
+            mid,
         )
 
     return {"status": "ok"}

@@ -86,9 +86,12 @@ async def send_reply(conversation_id: UUID, body: SendReplyBody):
     try:
         wa_log(logger, "ADMIN SEND", f"to +{phone}: {text[:80]}")
         await whatsapp.send_text(phone, text)
+    except ValueError as exc:
+        wa_log(logger, "ADMIN SEND FAILED", str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         wa_log(logger, "ADMIN SEND FAILED", str(exc))
-        raise HTTPException(status_code=502, detail=f"WhatsApp API error: {exc}") from exc
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     service.save_message(conversation_id, "assistant", text)
     return {"status": "sent", "phone": phone}

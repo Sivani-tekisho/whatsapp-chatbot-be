@@ -6,6 +6,7 @@ from uuid import UUID
 from supabase import Client
 
 from app.core.config import Settings
+from app.services.whatsapp_service import normalize_whatsapp_recipient
 
 
 def _is_valid_uuid(value: str) -> bool:
@@ -33,6 +34,7 @@ class ConversationService:
         return self._org_id
 
     def get_or_create(self, phone: str) -> dict:
+        phone = normalize_whatsapp_recipient(phone)
         org_id = self._org_id_str()
         existing = (
             self._db.table("conversations")

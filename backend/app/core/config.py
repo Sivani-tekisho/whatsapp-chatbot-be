@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     # RAG — pinecone = your existing index; supabase = upload to DB
     rag_provider: str = "pinecone"
     rag_top_k: int = 5
+    rag_min_similarity: float = 0.35
     conversation_history_limit: int = 10
 
     # Pinecone (existing RAG project)

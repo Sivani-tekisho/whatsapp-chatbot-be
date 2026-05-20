@@ -54,6 +54,55 @@ def create_app() -> FastAPI:
     async def health():
         return {"status": "healthy"}
 
+    @app.get("/health/whatsapp")
+    async def health_whatsapp():
+        """Verify Meta token can access the configured phone number ID."""
+        import httpx
+
+        from app.services.whatsapp_service import format_graph_api_error
+
+        s = get_settings()
+        if not s.whatsapp_access_token or not s.whatsapp_phone_number_id:
+            return {
+                "ok": False,
+                "error": "Set WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID in backend/.env",
+            }
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            me = await client.get(
+                "https://graph.facebook.com/v21.0/me",
+                params={"access_token": s.whatsapp_access_token},
+            )
+            phone = await client.get(
+                f"https://graph.facebook.com/v21.0/{s.whatsapp_phone_number_id}",
+                params={"access_token": s.whatsapp_access_token},
+            )
+
+        me_body = me.json() if me.headers.get("content-type", "").startswith("application/json") else {}
+        token_looks_like_user = "name" in me_body and me.status_code == 200
+
+        if phone.is_success:
+            data = phone.json()
+            return {
+                "ok": True,
+                "phone_number_id": s.whatsapp_phone_number_id,
+                "display_phone_number": data.get("display_phone_number"),
+                "verified_name": data.get("verified_name"),
+                "message": "Credentials OK — outbound WhatsApp should work.",
+            }
+
+        result = {
+            "ok": False,
+            "phone_number_id": s.whatsapp_phone_number_id,
+            "error": format_graph_api_error(phone),
+        }
+        if token_looks_like_user:
+            result["fix"] = (
+                "Token is a Facebook user token. Use the token from "
+                "Meta → WhatsApp → API Setup → Generate access token."
+            )
+        return result
+
     @app.get("/webhook/status")
     async def webhook_status():
         """Dashboard: Meta connection state (does not poll Meta — reads local memory)."""

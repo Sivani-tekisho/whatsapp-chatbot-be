@@ -26,6 +26,30 @@ Rules:
         rules = self.DEFAULT_RULES.format(fallback=fallback_message)
         return f"{base.strip()}\n{rules.strip()}"
 
+    def build_no_rag_prompt(
+        self,
+        company_name: str,
+        fallback_message: str,
+        user_message: str,
+        history: list[dict],
+    ) -> list[dict]:
+        """When retrieval finds nothing — polite reply without inventing company facts."""
+        system = (
+            f"You are a helpful WhatsApp assistant for {company_name}.\n"
+            "No company knowledge base context is available for this question.\n"
+            "Rules:\n"
+            f"- For questions about services, pricing, products, or company details, "
+            f"say exactly: \"{fallback_message}\"\n"
+            "- You may answer simple greetings and clarify what the user needs.\n"
+            "- Never invent services, prices, or policies.\n"
+            "- Keep replies under 500 characters."
+        )
+        messages: list[dict] = [{"role": "system", "content": system}]
+        for msg in history:
+            messages.append({"role": msg["role"], "content": msg["message"]})
+        messages.append({"role": "user", "content": user_message})
+        return messages
+
     def build_rag_prompt(
         self,
         system_prompt: str,

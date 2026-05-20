@@ -8,7 +8,7 @@ from supabase import Client
 from app.agents.company_agent import CompanyAgent
 from app.core.config import Settings
 from app.services.conversation_service import ConversationService
-from app.services.whatsapp_service import WhatsAppService
+from app.services.whatsapp_service import WhatsAppService, normalize_whatsapp_recipient
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +42,14 @@ class MessageProcessor:
         text: str,
         whatsapp_message_id: str | None = None,
     ) -> str:
-        """Full pipeline: history → RAG → LLM → save → reply."""
+        """Full pipeline: save user → RAG/LLM → send WhatsApp → save assistant."""
+        phone = normalize_whatsapp_recipient(phone)
         conversation = self._conversations.get_or_create(phone)
         conversation_id = UUID(conversation["id"])
         org_settings = self._get_org_settings()
+
+        # Persist inbound message before generating reply (audit + dashboard)
+        self._conversations.save_message(conversation_id, "user", text)
 
         greeting = org_settings.get("greeting_message", "")
         is_greeting_trigger = text.strip().lower() in {"hi", "hello", "hey", "start"}
@@ -55,15 +59,14 @@ class MessageProcessor:
         else:
             response = await self._agent.respond(text, conversation_id, org_settings)
 
-        self._conversations.save_message(conversation_id, "user", text)
-        self._conversations.save_message(conversation_id, "assistant", response)
-        logger.info("Saved conversation to database for +%s", phone)
-
         if whatsapp_message_id:
             try:
                 await self._whatsapp.mark_as_read(whatsapp_message_id)
             except Exception as exc:
                 logger.warning("Failed to mark message read: %s", exc)
 
+        # Send first — only save assistant message after Meta accepts delivery
         await self._whatsapp.send_text(phone, response)
+        self._conversations.save_message(conversation_id, "assistant", response)
+        logger.info("Saved conversation and sent reply for +%s", phone)
         return response
