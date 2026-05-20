@@ -28,3 +28,18 @@ OFFICE_ADDRESS = (
     "Tekisho Infotech Pvt. Ltd., 505 A, 5th Floor, Techno 1, "
     "Gachibowli Road, Raidurg, Hyderabad, Telangana - 500032"
 )
+
+# Placeholder name from DB migration — treat as unset so COMPANY_NAME below is used
+_DEFAULT_ORG_PLACEHOLDER = "Tekisho infotech"
+
+
+def resolve_company_name(db_name: str | None = None, env_name: str | None = None) -> str:
+    """Display name: real DB name → company_branding.py → env → fallback."""
+    n = (db_name or "").strip()
+    if n and n.lower() != _DEFAULT_ORG_PLACEHOLDER:
+        return n
+    if (COMPANY_NAME or "").strip():
+        return COMPANY_NAME.strip()
+    if (env_name or "").strip():
+        return env_name.strip()
+    return "Tekisho Infotech"

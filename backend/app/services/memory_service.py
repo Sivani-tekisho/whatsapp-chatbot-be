@@ -13,13 +13,21 @@ class MemoryService:
         self._limit = settings.conversation_history_limit
 
     def load_history(self, conversation_id: UUID) -> list[dict]:
-        result = (
+        """Conversation messages in chronological order (for LLM context)."""
+        base = (
             self._db.table("messages")
             .select("role, message")
             .eq("conversation_id", str(conversation_id))
-            .order("timestamp", desc=False)
-            .limit(self._limit)
-            .execute()
         )
-        rows = result.data or []
+        if self._limit > 0:
+            rows = (
+                base.order("timestamp", desc=True)
+                .limit(self._limit)
+                .execute()
+                .data
+                or []
+            )
+            rows = list(reversed(rows))
+        else:
+            rows = base.order("timestamp", desc=False).execute().data or []
         return [{"role": r["role"], "message": r["message"]} for r in rows if r["role"] != "system"]

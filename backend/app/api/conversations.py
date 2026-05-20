@@ -35,9 +35,12 @@ async def list_conversations(
     status: str | None = None,
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    lite: bool = Query(False, description="Skip per-chat Supabase lookups (faster polling)"),
 ):
     service = get_conversation_service()
-    items, total = service.list_conversations(search, status, limit, offset)
+    items, total = service.list_conversations(
+        search, status, limit, offset, include_previews=not lite
+    )
     return ConversationListResponse(
         items=[Conversation(**c) for c in items],
         total=total,

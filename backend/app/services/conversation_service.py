@@ -54,6 +54,15 @@ class ConversationService:
         )
         return created.data[0]
 
+    def count_messages(self, conversation_id: UUID) -> int:
+        result = (
+            self._db.table("messages")
+            .select("id", count="exact")
+            .eq("conversation_id", str(conversation_id))
+            .execute()
+        )
+        return result.count or 0
+
     def save_message(self, conversation_id: UUID, role: str, message: str) -> dict:
         row = (
             self._db.table("messages")
@@ -77,6 +86,8 @@ class ConversationService:
         status: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        *,
+        include_previews: bool = True,
     ) -> tuple[list[dict], int]:
         org_id = self._org_id_str()
         query = (
@@ -93,6 +104,12 @@ class ConversationService:
         result = query.range(offset, offset + limit - 1).execute()
         conversations = result.data or []
         total = result.count or len(conversations)
+
+        if not include_previews:
+            for conv in conversations:
+                conv.setdefault("message_count", 0)
+                conv.setdefault("last_message", None)
+            return conversations, total
 
         for conv in conversations:
             msgs = (

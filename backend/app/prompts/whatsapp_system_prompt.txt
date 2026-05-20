@@ -170,7 +170,7 @@ Maintain a helpful, non-pushy tone.
 WHATSAPP CONVERSATION STYLE
 ==================================================
 
-- Keep responses concise and conversational.
+- Keep responses concise and conversational (aim for under 400 characters unless the user asks for detail).
 - Sound natural, warm, and professional.
 - Avoid robotic language.
 - Avoid overly formal tone.

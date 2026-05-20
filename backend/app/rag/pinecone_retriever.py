@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID
 
 from pinecone import Pinecone
@@ -118,11 +119,17 @@ class PineconeRetriever:
         )
 
         vector = self._embeddings.embed_text(query)
-        per_ns_k = max(2, limit) if len(target_namespaces) == 1 else max(2, limit // len(target_namespaces) + 1)
+        per_ns_k = limit
 
         merged: list[dict] = []
-        for ns in target_namespaces:
-            merged.extend(self._query_namespace(vector, ns, per_ns_k))
+        workers = min(4, len(target_namespaces))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(self._query_namespace, vector, ns, per_ns_k): ns
+                for ns in target_namespaces
+            }
+            for future in as_completed(futures):
+                merged.extend(future.result())
 
         merged.sort(key=lambda c: c["similarity"], reverse=True)
 

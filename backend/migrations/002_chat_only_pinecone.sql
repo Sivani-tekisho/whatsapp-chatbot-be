@@ -41,4 +41,3 @@ SELECT
     'Company Assistant',
     'You are an AI assistant for the company. Answer only using company information. Never invent information. Keep responses short for WhatsApp. Prefer bullet points.'
 WHERE NOT EXISTS (SELECT 1 FROM organizations LIMIT 1);
-git branch -M main

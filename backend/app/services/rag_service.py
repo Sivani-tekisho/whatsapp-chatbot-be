@@ -6,6 +6,7 @@ from supabase import Client
 
 from app.core.config import Settings
 from app.rag.embeddings import EmbeddingService
+from app.rag.chunk_guard import filter_company_chunks
 from app.rag.retriever_factory import get_retriever
 
 
@@ -32,11 +33,12 @@ class RAGService:
         org_id = self._resolve_org_id(client) if self._provider == "supabase" else None
         chunks = self._retriever.retrieve(query, org_id, self._top_k)
         min_score = self._settings.rag_min_similarity
-        return [
+        texts = [
             c["chunk_text"]
             for c in chunks
             if c.get("chunk_text") and float(c.get("similarity", 0)) >= min_score
         ]
+        return filter_company_chunks(texts, enabled=self._settings.rag_filter_off_topic)
 
     def has_relevant_context(self, chunks: list[str]) -> bool:
         return len(chunks) > 0

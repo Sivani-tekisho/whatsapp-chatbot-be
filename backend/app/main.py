@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+
     settings = get_settings()
     wa_log(logger, "SERVER START", settings.app_name)
     wa_log(
@@ -24,6 +26,18 @@ async def lifespan(app: FastAPI):
         "https://YOUR-NGROK-HOST/webhook OR /api/v1/webhook (both work)",
     )
     wa_log(logger, "WAITING", "Real chats appear as: [WHATSAPP] INBOUND POST → USER MESSAGE → REPLY SENT")
+    wa_log(logger, "OPENAI MODEL", settings.openai_model or "gpt-4o-mini")
+
+    async def _warmup() -> None:
+        try:
+            from app.dependencies import get_rag_service
+
+            await asyncio.to_thread(get_rag_service().retrieve_context, "warmup")
+            wa_log(logger, "WARMUP OK", "Pinecone + embeddings ready")
+        except Exception as exc:
+            wa_log(logger, "WARMUP SKIP", str(exc)[:120])
+
+    await _warmup()
     yield
 
 

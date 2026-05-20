@@ -8,13 +8,17 @@ from app.core.config import Settings, get_settings
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 _WHATSAPP_TEMPLATE_PATH = _PROMPTS_DIR / "whatsapp_system_prompt.txt"
+_WHATSAPP_COMPACT_PATH = _PROMPTS_DIR / "whatsapp_system_prompt_compact.txt"
 
 
-@lru_cache(maxsize=1)
-def _load_whatsapp_system_template() -> str:
-    if not _WHATSAPP_TEMPLATE_PATH.is_file():
+@lru_cache(maxsize=2)
+def _load_whatsapp_system_template(compact: bool = False) -> str:
+    path = _WHATSAPP_COMPACT_PATH if compact else _WHATSAPP_TEMPLATE_PATH
+    if not path.is_file():
+        path = _WHATSAPP_TEMPLATE_PATH
+    if not path.is_file():
         return ""
-    return _WHATSAPP_TEMPLATE_PATH.read_text(encoding="utf-8")
+    return path.read_text(encoding="utf-8")
 
 
 def _branding(attr: str) -> str:
@@ -43,12 +47,7 @@ def render_whatsapp_system_prompt(
     s = settings or get_settings()
     org = org_settings or {}
 
-    display_name = (
-        (company_name or "").strip()
-        or (s.company_name or "").strip()
-        or _branding("COMPANY_NAME")
-        or "Our Company"
-    )
+    display_name = branding.resolve_company_name(company_name, s.company_name)
 
     mapping = {
         "COMPANY_NAME": display_name,
@@ -69,7 +68,8 @@ def render_whatsapp_system_prompt(
         ),
     }
 
-    raw = _load_whatsapp_system_template()
+    use_compact = s.whatsapp_use_compact_prompt
+    raw = _load_whatsapp_system_template(use_compact)
     if not raw.strip():
         return ""
 
@@ -78,6 +78,23 @@ def render_whatsapp_system_prompt(
         out = out.replace("{{" + key + "}}", value)
     # Leave any unreplaced {{KEY}} as-is if we add new placeholders later
     return out.strip()
+
+
+# 0 = do not truncate organization system_prompt from the database
+_MAX_CUSTOM_PROMPT_CHARS = 0
+
+
+def _history_for_llm(history: list[dict], user_message: str) -> list[dict]:
+    """Drop trailing user turn if it duplicates the message we append."""
+    if not history:
+        return []
+    last = history[-1]
+    if (
+        last.get("role") == "user"
+        and (last.get("message") or "").strip() == user_message.strip()
+    ):
+        return history[:-1]
+    return history
 
 
 class PromptService:
@@ -110,11 +127,37 @@ Rules:
         if whatsapp_core:
             parts = [whatsapp_core]
             if custom_prompt and str(custom_prompt).strip():
+                extra = str(custom_prompt).strip()
+                if _MAX_CUSTOM_PROMPT_CHARS > 0 and len(extra) > _MAX_CUSTOM_PROMPT_CHARS:
+                    extra = extra[: _MAX_CUSTOM_PROMPT_CHARS - 3].rstrip() + "..."
                 parts.append(
                     "\n---\n## Additional organization instructions (from database)\n"
-                    + str(custom_prompt).strip()
+                    + extra
                 )
             return "\n".join(parts).strip()
+
+    def build_rag_system_prompt(
+        self,
+        company_name: str,
+        fallback_message: str,
+        org_settings: dict | None = None,
+        custom_prompt: str | None = None,
+    ) -> str:
+        """Compact system text for RAG replies (avoids huge DB prompts)."""
+        settings = get_settings()
+        if settings.whatsapp_rag_minimal_system:
+            return render_whatsapp_system_prompt(
+                company_name=company_name,
+                fallback_message=fallback_message,
+                org_settings=org_settings,
+                settings=settings,
+            )
+        return self.build_system_prompt(
+            company_name=company_name,
+            custom_prompt=custom_prompt,
+            fallback_message=fallback_message,
+            org_settings=org_settings,
+        )
 
         base = custom_prompt or (f"You are an AI assistant for {company_name}.")
         rules = self.DEFAULT_RULES.format(fallback=fallback_message)
@@ -137,15 +180,14 @@ Rules:
             settings=settings,
         )
 
+        history = _history_for_llm(history, user_message)
+
         if base:
             system = (
                 base
-                + "\n\n==================================================\n"
-                + "## Current retrieval state\n"
-                + "No knowledge base chunks were retrieved for this user message. "
-                "Apply **WHEN INFORMATION IS NOT VERIFIED**, **GENERAL AI KNOWLEDGE USAGE**, "
-                "and **CONTACT & BUSINESS INTEREST HANDLING** strictly. "
-                "Do not invent company-specific facts."
+                + "\n\nNo knowledge base match for this message. "
+                + "Do not invent company pricing, policies, or product details. "
+                + f'For company-specific facts use: "{fallback_message}"'
             )
         else:
             system = (
@@ -165,17 +207,35 @@ Rules:
         messages.append({"role": "user", "content": user_message})
         return messages
 
+    @staticmethod
+    def _trim_chunks(chunks: list[str], max_chars: int) -> list[str]:
+        if max_chars <= 0:
+            return chunks
+        trimmed = []
+        for c in chunks:
+            c = (c or "").strip()
+            if len(c) > max_chars:
+                c = c[: max_chars - 3].rstrip() + "..."
+            trimmed.append(c)
+        return trimmed
+
     def build_rag_prompt(
         self,
         system_prompt: str,
         context_chunks: list[str],
         user_message: str,
         history: list[dict],
+        max_chunk_chars: int | None = None,
+        company_name: str = "Tekisho",
     ) -> list[dict]:
-        context_block = "\n\n---\n\n".join(context_chunks) if context_chunks else "(No relevant documents found)"
+        limit = max_chunk_chars if max_chunk_chars is not None else get_settings().rag_chunk_max_chars
+        history = _history_for_llm(history, user_message)
+        chunks = self._trim_chunks(context_chunks, limit)
+        context_block = "\n\n---\n\n".join(chunks) if chunks else "(No relevant documents found)"
         system_with_context = (
             f"{system_prompt}\n\n"
-            f"## Company Knowledge Base (retrieved context — treat as primary for facts)\n{context_block}"
+            f"## Knowledge base (use for facts; ignore unrelated industries)\n"
+            f"{context_block}"
         )
 
         messages: list[dict] = [{"role": "system", "content": system_with_context}]
