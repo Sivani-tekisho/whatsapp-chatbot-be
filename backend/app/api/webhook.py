@@ -17,6 +17,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["webhook"])
 
 
+def _extract_message_statuses(body: dict) -> list[dict]:
+    """Delivery updates: sent, delivered, read, failed (requires webhook field)."""
+    statuses = []
+    for entry in body.get("entry", []):
+        for change in entry.get("changes", []):
+            value = change.get("value", {})
+            for st in value.get("statuses", []):
+                statuses.append(
+                    {
+                        "message_id": st.get("id"),
+                        "status": st.get("status"),
+                        "recipient_id": st.get("recipient_id"),
+                        "errors": st.get("errors") or [],
+                    }
+                )
+    return statuses
+
+
 def _extract_incoming_message(body: dict) -> list[dict]:
     messages = []
     for entry in body.get("entry", []):
@@ -90,10 +108,31 @@ async def receive_webhook(request: Request, background_tasks: BackgroundTasks):
         return {"status": "ignored"}
 
     incoming = _extract_incoming_message(body)
+    status_updates = _extract_message_statuses(body)
+
+    for st in status_updates:
+        rid = st.get("recipient_id") or "?"
+        mid = (st.get("message_id") or "")[:40]
+        state = st.get("status")
+        if state == "failed":
+            err_parts = []
+            for e in st.get("errors") or []:
+                title = e.get("title") or e.get("message") or str(e)
+                code = e.get("code")
+                err_parts.append(f"{title} (code={code})" if code else title)
+            detail = "; ".join(err_parts) or "unknown"
+            wa_log(logger, "DELIVERY FAILED", f"+{rid} wamid={mid}… | {detail}")
+            log_event("POST", f"Delivery failed to +{rid}: {detail}")
+        elif state in ("delivered", "read"):
+            wa_log(logger, "DELIVERY OK", f"+{rid} status={state} wamid={mid}…")
+        elif state == "sent":
+            wa_log(logger, "DELIVERY SENT", f"+{rid} wamid={mid}…")
 
     if not incoming:
+        if status_updates:
+            return {"status": "ok"}
         log_event("POST", "No text message in payload (status/update?)")
-        wa_log(logger, "INBOUND POST", "No user text — subscribe to 'messages' field in Meta")
+        wa_log(logger, "INBOUND POST", "No user text — subscribe to 'messages' in Meta webhook")
         return {"status": "ok"}
 
     for msg in incoming:

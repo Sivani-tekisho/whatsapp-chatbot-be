@@ -76,6 +76,34 @@ class WhatsAppService:
                 response=response,
             )
 
+    async def send_template(
+        self,
+        to: str,
+        template_name: str,
+        language_code: str = "en",
+        body_parameters: list[str] | None = None,
+    ) -> dict:
+        """Send an approved Meta template (required for business-initiated first contact)."""
+        recipient = normalize_whatsapp_recipient(to)
+        template: dict = {
+            "name": template_name,
+            "language": {"code": language_code},
+        }
+        if body_parameters:
+            template["components"] = [
+                {
+                    "type": "body",
+                    "parameters": [{"type": "text", "text": p} for p in body_parameters],
+                }
+            ]
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": recipient,
+            "type": "template",
+            "template": template,
+        }
+        return await self._post_messages(payload)
+
     async def send_text(self, to: str, text: str) -> dict:
         recipient = normalize_whatsapp_recipient(to)
         payload = {
@@ -86,6 +114,14 @@ class WhatsAppService:
             "text": {"preview_url": False, "body": text[:4096]},
         }
         return await self._post_messages(payload)
+
+    @staticmethod
+    def extract_sent_message_id(api_response: dict) -> str | None:
+        """wamid from Graph API — use to match delivery status webhooks."""
+        msgs = api_response.get("messages") or []
+        if msgs and isinstance(msgs[0], dict):
+            return msgs[0].get("id")
+        return None
 
     async def mark_as_read(self, message_id: str) -> None:
         payload = {

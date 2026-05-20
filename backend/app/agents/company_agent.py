@@ -2,6 +2,7 @@
 
 from uuid import UUID
 
+from app import company_branding as branding
 from app.core.config import Settings
 from app.services.llm_service import LLMService
 from app.services.memory_service import MemoryService
@@ -36,7 +37,12 @@ class CompanyAgent:
         fallback = org_settings.get(
             "fallback_message", "I couldn't find that information."
         )
-        company_name = org_settings.get("name", self._settings.company_name)
+        company_name = (
+            (org_settings.get("name") or "").strip()
+            or (self._settings.company_name or "").strip()
+            or str(getattr(branding, "COMPANY_NAME", "") or "").strip()
+            or "Our Company"
+        )
 
         if not self._rag.has_relevant_context(context_chunks):
             messages = self._prompts.build_no_rag_prompt(
@@ -44,6 +50,7 @@ class CompanyAgent:
                 fallback_message=fallback,
                 user_message=user_message,
                 history=history,
+                org_settings=org_settings,
             )
             return await self._llm.generate(messages)
 
@@ -51,6 +58,7 @@ class CompanyAgent:
             company_name=company_name,
             custom_prompt=org_settings.get("system_prompt"),
             fallback_message=fallback,
+            org_settings=org_settings,
         )
 
         messages = self._prompts.build_rag_prompt(

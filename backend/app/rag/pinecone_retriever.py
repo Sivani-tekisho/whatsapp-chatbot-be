@@ -1,15 +1,25 @@
-"""Vector retrieval from existing Pinecone index."""
+"""Vector retrieval from existing Pinecone index (multi-namespace)."""
 
+from __future__ import annotations
+
+import logging
 from uuid import UUID
 
 from pinecone import Pinecone
 
 from app.core.config import Settings
 from app.rag.embeddings import EmbeddingService
+from app.rag.namespace_router import (
+    DEFAULT_NAMESPACE,
+    namespaces_for_query,
+    parse_namespace_list,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class PineconeRetriever:
-    """Query an existing Pinecone index (your prior RAG project)."""
+    """Query an existing Pinecone index across Tekisho + product namespaces."""
 
     def __init__(self, settings: Settings, embedding_service: EmbeddingService) -> None:
         if not settings.pinecone_api_key:
@@ -17,14 +27,24 @@ class PineconeRetriever:
 
         self._embeddings = embedding_service
         self._top_k = settings.rag_top_k
-        self._namespace = settings.pinecone_namespace or None
         self._text_field = settings.pinecone_text_metadata_key
+
+        # Single-namespace override (legacy) wins over multi-namespace list
+        if settings.pinecone_namespace.strip():
+            self._all_namespaces = [settings.pinecone_namespace.strip()]
+        else:
+            configured = parse_namespace_list(settings.pinecone_namespaces)
+            self._all_namespaces = configured or [
+                DEFAULT_NAMESPACE,
+                "vocalq",
+                "leadq",
+                "emailq",
+            ]
 
         pc = Pinecone(api_key=settings.pinecone_api_key)
         if settings.pinecone_host:
             self._index = pc.Index(host=settings.pinecone_host)
         elif settings.pinecone_index_name:
-            # Resolve host from index name (serverless / pod indexes)
             desc = pc.describe_index(settings.pinecone_index_name)
             host = getattr(desc, "host", None) or (
                 desc.get("host") if isinstance(desc, dict) else None
@@ -36,40 +56,85 @@ class PineconeRetriever:
         else:
             raise RuntimeError("Set PINECONE_HOST or PINECONE_INDEX_NAME in .env")
 
+    def _extract_text(self, metadata: dict) -> str | None:
+        meta = metadata or {}
+        text = (
+            meta.get(self._text_field)
+            or meta.get("text")
+            or meta.get("content")
+            or meta.get("chunk_text")
+            or meta.get("page_content")
+        )
+        return str(text) if text else None
+
+    def _query_namespace(
+        self,
+        vector: list[float],
+        namespace: str,
+        top_k: int,
+    ) -> list[dict]:
+        kwargs: dict = {
+            "vector": vector,
+            "top_k": top_k,
+            "include_metadata": True,
+            "namespace": namespace,
+        }
+        response = self._index.query(**kwargs)
+        chunks: list[dict] = []
+        for match in response.matches:
+            text = self._extract_text(match.metadata or {})
+            if not text:
+                continue
+            # Label product namespaces so the LLM knows which product the chunk is about
+            if namespace != DEFAULT_NAMESPACE:
+                text = f"[{namespace}] {text}"
+            chunks.append(
+                {
+                    "chunk_text": text,
+                    "similarity": float(match.score or 0),
+                    "namespace": namespace,
+                }
+            )
+        return chunks
+
     def retrieve(
         self,
         query: str,
         organization_id: UUID | None = None,
         top_k: int | None = None,
     ) -> list[dict]:
-        del organization_id  # optional: use PINECONE_NAMESPACE per tenant later
+        del organization_id
+
+        limit = top_k or self._top_k
+        target_namespaces = namespaces_for_query(query, self._all_namespaces)
+
+        if len(self._all_namespaces) == 1:
+            target_namespaces = self._all_namespaces
+
+        logger.debug(
+            "Pinecone RAG query namespaces=%s (configured=%s)",
+            target_namespaces,
+            self._all_namespaces,
+        )
 
         vector = self._embeddings.embed_text(query)
-        kwargs: dict = {
-            "vector": vector,
-            "top_k": top_k or self._top_k,
-            "include_metadata": True,
-        }
-        if self._namespace:
-            kwargs["namespace"] = self._namespace
+        per_ns_k = max(2, limit) if len(target_namespaces) == 1 else max(2, limit // len(target_namespaces) + 1)
 
-        response = self._index.query(**kwargs)
+        merged: list[dict] = []
+        for ns in target_namespaces:
+            merged.extend(self._query_namespace(vector, ns, per_ns_k))
 
-        chunks: list[dict] = []
-        for match in response.matches:
-            meta = match.metadata or {}
-            text = (
-                meta.get(self._text_field)
-                or meta.get("text")
-                or meta.get("content")
-                or meta.get("chunk_text")
-                or meta.get("page_content")
-            )
-            if text:
-                chunks.append(
-                    {
-                        "chunk_text": str(text),
-                        "similarity": float(match.score or 0),
-                    }
-                )
-        return chunks
+        merged.sort(key=lambda c: c["similarity"], reverse=True)
+
+        seen_text: set[str] = set()
+        unique: list[dict] = []
+        for chunk in merged:
+            key = chunk["chunk_text"][:200]
+            if key in seen_text:
+                continue
+            seen_text.add(key)
+            unique.append(chunk)
+            if len(unique) >= limit:
+                break
+
+        return unique

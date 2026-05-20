@@ -35,6 +35,27 @@ class Settings(BaseSettings):
     )
     app_secret: str = ""
 
+    # WhatsApp template for first contact to new users (Meta-approved)
+    whatsapp_welcome_template_name: str = Field(
+        default="welcome_messages",
+        validation_alias=AliasChoices(
+            "WHATSAPP_WELCOME_TEMPLATE_NAME",
+            "WHATSAPP_TEMPLATE_NAME",
+        ),
+    )
+    whatsapp_welcome_template_language: str = Field(
+        default="en",
+        validation_alias=AliasChoices(
+            "WHATSAPP_WELCOME_TEMPLATE_LANGUAGE",
+            "WHATSAPP_TEMPLATE_LANGUAGE",
+        ),
+    )
+    # Comma-separated values for {{1}}, {{2}}, … in the welcome template body
+    whatsapp_welcome_template_body_params: str = Field(
+        default="",
+        validation_alias=AliasChoices("WHATSAPP_WELCOME_TEMPLATE_BODY_PARAMS"),
+    )
+
     # Supabase
     supabase_url: str = ""
     supabase_key: str = ""
@@ -54,10 +75,22 @@ class Settings(BaseSettings):
     pinecone_index_name: str = ""
     pinecone_host: str = ""
     pinecone_namespace: str = ""
+    # Comma-separated Pinecone namespaces (used when pinecone_namespace is empty)
+    pinecone_namespaces: str = "__default__,vocalq,leadq,emailq"
     pinecone_text_metadata_key: str = "text"
 
-    # Company branding (overridden by DB settings)
-    company_name: str = "Our Company"
+    # Company branding (overridden by DB / .env; see app.company_branding for file defaults)
+    company_name: str = ""
+    # Public contact info for WhatsApp system prompt (see app/prompts/whatsapp_system_prompt.txt)
+    website_url: str = Field(default="", validation_alias=AliasChoices("WEBSITE_URL", "COMPANY_WEBSITE_URL"))
+    support_email: str = Field(default="", validation_alias=AliasChoices("SUPPORT_EMAIL", "COMPANY_SUPPORT_EMAIL"))
+    sales_email: str = Field(default="", validation_alias=AliasChoices("SALES_EMAIL", "COMPANY_SALES_EMAIL"))
+    company_phone: str = Field(default="", validation_alias=AliasChoices("PHONE_NUMBER", "COMPANY_PHONE"))
+    company_whatsapp_display: str = Field(
+        default="",
+        validation_alias=AliasChoices("WHATSAPP_NUMBER", "COMPANY_WHATSAPP_NUMBER", "COMPANY_WHATSAPP_DISPLAY"),
+    )
+    office_address: str = Field(default="", validation_alias=AliasChoices("OFFICE_ADDRESS", "COMPANY_OFFICE_ADDRESS"))
 
 
 @lru_cache

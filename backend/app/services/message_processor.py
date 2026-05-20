@@ -9,6 +9,7 @@ from app.agents.company_agent import CompanyAgent
 from app.core.config import Settings
 from app.services.conversation_service import ConversationService
 from app.services.whatsapp_service import WhatsAppService, normalize_whatsapp_recipient
+from app.utils.whatsapp_text import format_for_whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,8 @@ class MessageProcessor:
             response = greeting
         else:
             response = await self._agent.respond(text, conversation_id, org_settings)
+
+        response = format_for_whatsapp(response)
 
         if whatsapp_message_id:
             try:
