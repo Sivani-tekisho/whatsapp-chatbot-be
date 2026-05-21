@@ -1,6 +1,5 @@
 """System prompt construction for the company agent."""
 
-from functools import lru_cache
 from pathlib import Path
 
 from app import company_branding as branding
@@ -11,14 +10,26 @@ _WHATSAPP_TEMPLATE_PATH = _PROMPTS_DIR / "whatsapp_system_prompt.txt"
 _WHATSAPP_COMPACT_PATH = _PROMPTS_DIR / "whatsapp_system_prompt_compact.txt"
 
 
-@lru_cache(maxsize=2)
+_TEMPLATE_CACHE: dict[bool, str] = {}
+
+
 def _load_whatsapp_system_template(compact: bool = False) -> str:
-    path = _WHATSAPP_COMPACT_PATH if compact else _WHATSAPP_TEMPLATE_PATH
-    if not path.is_file():
-        path = _WHATSAPP_TEMPLATE_PATH
-    if not path.is_file():
-        return ""
-    return path.read_text(encoding="utf-8")
+    """Read prompt template from disk. Cached in module dict so a server restart
+    always picks up edits to the .txt file (no lru_cache freeze)."""
+    if compact not in _TEMPLATE_CACHE:
+        path = _WHATSAPP_COMPACT_PATH if compact else _WHATSAPP_TEMPLATE_PATH
+        if not path.is_file():
+            path = _WHATSAPP_TEMPLATE_PATH
+        if not path.is_file():
+            _TEMPLATE_CACHE[compact] = ""
+        else:
+            _TEMPLATE_CACHE[compact] = path.read_text(encoding="utf-8")
+    return _TEMPLATE_CACHE[compact]
+
+
+def reload_prompt_templates() -> None:
+    """Call this to force re-read of .txt files without restarting the server."""
+    _TEMPLATE_CACHE.clear()
 
 
 def _branding(attr: str) -> str:
@@ -182,9 +193,19 @@ Rules:
 
         history = _history_for_llm(history, user_message)
 
+        history_context = (
+            "\n\nThis is a continuing conversation — the prior turns are included below. "
+            "Do NOT repeat introductions or information already given. "
+            "Reference what was already discussed where relevant (e.g. 'As I mentioned…'). "
+            "If the user is asking the same question again, acknowledge it and add new detail or ask how you can help further."
+            if history
+            else ""
+        )
+
         if base:
             system = (
                 base
+                + history_context
                 + "\n\nNo knowledge base match for this message. "
                 + "Do not invent company pricing, policies, or product details. "
                 + f'For company-specific facts use: "{fallback_message}"'
@@ -232,8 +253,14 @@ Rules:
         history = _history_for_llm(history, user_message)
         chunks = self._trim_chunks(context_chunks, limit)
         context_block = "\n\n---\n\n".join(chunks) if chunks else "(No relevant documents found)"
+        history_context = (
+            "\n\nThis is a continuing conversation — prior turns are included. "
+            "Do NOT repeat introductions already given. Reference what was discussed where relevant."
+            if history
+            else ""
+        )
         system_with_context = (
-            f"{system_prompt}\n\n"
+            f"{system_prompt}{history_context}\n\n"
             f"## Knowledge base (use for facts; ignore unrelated industries)\n"
             f"{context_block}"
         )

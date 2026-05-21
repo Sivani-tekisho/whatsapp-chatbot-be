@@ -116,7 +116,7 @@ async def send_welcome_template(body: WelcomeTemplateBody):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     service = get_conversation_service()
-    conv = service.get_or_create(phone)
+    conv, _ = service.get_or_create(phone)
     conversation_id = UUID(conv["id"])
     whatsapp = get_whatsapp_service()
     wa_message_id = None
@@ -172,7 +172,7 @@ async def send_outbound_to_phone(body: OutboundToNewBody):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     service = get_conversation_service()
-    conv = service.get_or_create(phone)
+    conv, _ = service.get_or_create(phone)
     conversation_id = UUID(conv["id"])
     whatsapp = get_whatsapp_service()
     wa_message_id = None
@@ -224,6 +224,22 @@ async def update_conversation_status(conversation_id: UUID, body: StatusUpdate):
         raise HTTPException(status_code=400, detail="Invalid status")
     service = get_conversation_service()
     return service.update_status(conversation_id, body.status)
+
+
+@router.delete("/{conversation_id}/messages")
+async def clear_chat(conversation_id: UUID):
+    """Delete all messages for a conversation (dashboard clear chat)."""
+    service = get_conversation_service()
+    conv = service.get_conversation_with_messages(conversation_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    db = service._db
+    db.table("messages").delete().eq("conversation_id", str(conversation_id)).execute()
+    # Bust the in-memory history cache so the bot starts fresh
+    from app.dependencies import get_memory_service
+    get_memory_service().invalidate(conversation_id)
+    wa_log(logger, "CLEAR CHAT", f"conversation {conversation_id} messages deleted")
+    return {"status": "cleared", "conversation_id": str(conversation_id)}
 
 
 @router.post("/{conversation_id}/reply")

@@ -1,16 +1,20 @@
 """Application configuration via environment variables."""
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Resolve .env: backend/app/core/config.py → go up 3 levels to whatsapp-chatbot-be/
+_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 
 class Settings(BaseSettings):
     """Centralized settings loaded from environment."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_ENV_FILE),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -23,8 +27,8 @@ class Settings(BaseSettings):
     # OpenAI
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
-    # 0 = model default (no artificial cap)
-    openai_max_tokens: int = 0
+    # Max tokens for WhatsApp replies — short messages = faster LLM response
+    openai_max_tokens: int = 150
     whatsapp_use_compact_prompt: bool = True
     # False = include full DB system_prompt + compact/file template on RAG replies
     whatsapp_rag_minimal_system: bool = False
@@ -71,13 +75,13 @@ class Settings(BaseSettings):
 
     # RAG — pinecone = your existing index; supabase = upload to DB
     rag_provider: str = "pinecone"
-    rag_top_k: int = 8
-    rag_min_similarity: float = 0.35
-    # 0 = do not truncate retrieved chunks
-    rag_chunk_max_chars: int = 0
+    rag_top_k: int = 2
+    rag_min_similarity: float = 0.40
+    # Truncate each chunk — keeps prompt short, LLM processes faster
+    rag_chunk_max_chars: int = 300
     rag_filter_off_topic: bool = False
-    # 0 = load full conversation history for the LLM
-    conversation_history_limit: int = 0
+    # number of past messages kept in context for the LLM (per conversation)
+    conversation_history_limit: int = 4
 
     # Pinecone (existing RAG project)
     pinecone_api_key: str = ""

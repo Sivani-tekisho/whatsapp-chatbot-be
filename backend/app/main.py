@@ -1,9 +1,10 @@
 """FastAPI application entry point."""
 
 import logging
+import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import conversations, documents, settings as settings_api, webhook
@@ -25,8 +26,21 @@ async def lifespan(app: FastAPI):
         "META CALLBACK URL",
         "https://YOUR-NGROK-HOST/webhook OR /api/v1/webhook (both work)",
     )
-    wa_log(logger, "WAITING", "Real chats appear as: [WHATSAPP] INBOUND POST → USER MESSAGE → REPLY SENT")
+    wa_log(logger, "WAITING", "Real chats appear as: [WHATSAPP] INBOUND POST - USER MESSAGE - REPLY SENT")
     wa_log(logger, "OPENAI MODEL", settings.openai_model or "gpt-4o-mini")
+
+    # Pre-warm intent classifier (compiles regex patterns once)
+    from app.services import intent_classifier as _ic  # noqa: F401
+    wa_log(logger, "STARTUP", "Intent classifier loaded")
+
+    # Pre-warm response cache module
+    from app.services import response_cache as _rc  # noqa: F401
+    wa_log(logger, "STARTUP", "Response cache initialised")
+
+    # Pre-warm shared HTTP client pool
+    from app.dependencies import get_http_client
+    get_http_client()
+    wa_log(logger, "STARTUP", "HTTP client pool ready")
 
     async def _warmup() -> None:
         try:
@@ -38,7 +52,17 @@ async def lifespan(app: FastAPI):
             wa_log(logger, "WARMUP SKIP", str(exc)[:120])
 
     await _warmup()
+
+    # Ensure latest prompt file is loaded (clears any stale cache)
+    from app.services.prompt_service import reload_prompt_templates
+    reload_prompt_templates()
+
     yield
+
+    # ── Shutdown ──────────────────────────────────────────────────────────────
+    from app.dependencies import close_http_client
+    await close_http_client()
+    wa_log(logger, "SHUTDOWN", "HTTP client pool closed")
 
 
 def create_app() -> FastAPI:
@@ -51,11 +75,36 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
+        allow_origins=[
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:5175",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174",
+            "http://127.0.0.1:5175",
+            "http://127.0.0.1:3000",
+        ],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # ── Request timing middleware ─────────────────────────────────────────────
+    @app.middleware("http")
+    async def add_timing_header(request: Request, call_next):
+        t0 = time.perf_counter()
+        response = await call_next(request)
+        elapsed = time.perf_counter() - t0
+        response.headers["X-Response-Time"] = f"{elapsed:.3f}s"
+        # Only log slow requests or webhook calls to avoid noise
+        if elapsed > 1.0 or "/webhook" in request.url.path:
+            wa_log(
+                logger,
+                "REQUEST TIME",
+                f"{request.method} {request.url.path}  {elapsed:.3f}s  status={response.status_code}",
+            )
+        return response
 
     # Meta webhook: support both paths (teammate stacks often use /api/v1/webhook)
     app.include_router(webhook.router)

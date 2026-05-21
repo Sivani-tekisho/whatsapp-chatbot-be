@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID
 
 from pinecone import Pinecone
 
+from app.cache import rag_result_cache
 from app.core.config import Settings
 from app.rag.embeddings import EmbeddingService
 from app.rag.namespace_router import (
@@ -121,6 +124,12 @@ class PineconeRetriever:
         vector = self._embeddings.embed_text(query)
         per_ns_k = limit
 
+        # ── Embedding-vector cache (skip Pinecone if we've seen this vector) ─
+        _vec_key = hashlib.md5(json.dumps(vector[:8]).encode()).hexdigest()
+        if _vec_key in rag_result_cache:
+            logger.info("[RAG] Cache hit — skipping Pinecone query")
+            return rag_result_cache[_vec_key]
+
         merged: list[dict] = []
         workers = min(4, len(target_namespaces))
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -144,4 +153,12 @@ class PineconeRetriever:
             if len(unique) >= limit:
                 break
 
+        rag_result_cache[_vec_key] = unique
         return unique
+
+    def _query_all_namespaces(self, vector: list[float], top_k: int) -> list[dict]:
+        """Query Pinecone with a pre-computed vector (no embed step).
+        Used by retrieve_context_async() so embed and Pinecone can overlap.
+        Queries only __default__ namespace for speed (4x faster than 4 namespaces).
+        """
+        return self._query_namespace(vector, DEFAULT_NAMESPACE, top_k)

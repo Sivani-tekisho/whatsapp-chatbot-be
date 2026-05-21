@@ -50,9 +50,10 @@ def _hint_for_meta_error(err: dict) -> str | None:
 class WhatsAppService:
     BASE_URL = "https://graph.facebook.com/v21.0"
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, http_client: "httpx.AsyncClient | None" = None) -> None:
         self._token = settings.whatsapp_access_token
         self._phone_id = settings.whatsapp_phone_number_id
+        self._http_client = http_client  # shared client injected from dependencies
 
     def _headers(self) -> dict:
         return {
@@ -66,15 +67,20 @@ class WhatsAppService:
                 "WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID must be set in backend/.env"
             )
         url = f"{self.BASE_URL}/{self._phone_id}/messages"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, json=payload, headers=self._headers())
-            if response.is_success:
-                return response.json()
-            raise httpx.HTTPStatusError(
-                format_graph_api_error(response),
-                request=response.request,
-                response=response,
-            )
+        if self._http_client is not None:
+            # Use the long-lived shared connection pool
+            response = await self._http_client.post(url, json=payload, headers=self._headers())
+        else:
+            # Fallback: create a per-request client (e.g. during testing)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, json=payload, headers=self._headers())
+        if response.is_success:
+            return response.json()
+        raise httpx.HTTPStatusError(
+            format_graph_api_error(response),
+            request=response.request,
+            response=response,
+        )
 
     async def send_template(
         self,
@@ -122,6 +128,21 @@ class WhatsAppService:
         if msgs and isinstance(msgs[0], dict):
             return msgs[0].get("id")
         return None
+
+    async def send_reaction(self, to: str, message_id: str, emoji: str) -> None:
+        """React to a specific message with an emoji — best-effort, fire-and-forget."""
+        recipient = normalize_whatsapp_recipient(to)
+        payload = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": recipient,
+            "type": "reaction",
+            "reaction": {"message_id": message_id, "emoji": emoji},
+        }
+        try:
+            await self._post_messages(payload)
+        except Exception:
+            pass
 
     async def mark_as_read(self, message_id: str) -> None:
         payload = {

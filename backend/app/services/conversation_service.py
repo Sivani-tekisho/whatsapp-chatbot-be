@@ -33,7 +33,8 @@ class ConversationService:
             self._org_id = org.data[0]["id"]
         return self._org_id
 
-    def get_or_create(self, phone: str) -> dict:
+    def get_or_create(self, phone: str) -> tuple[dict, bool]:
+        """Return (conversation_dict, is_new). is_new=True means first-ever message."""
         phone = normalize_whatsapp_recipient(phone)
         org_id = self._org_id_str()
         existing = (
@@ -45,14 +46,14 @@ class ConversationService:
             .execute()
         )
         if existing.data:
-            return existing.data[0]
+            return existing.data[0], False
 
         created = (
             self._db.table("conversations")
             .insert({"organization_id": org_id, "phone": phone})
             .execute()
         )
-        return created.data[0]
+        return created.data[0], True
 
     def count_messages(self, conversation_id: UUID) -> int:
         result = (
