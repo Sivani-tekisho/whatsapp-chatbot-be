@@ -34,10 +34,16 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_messages_conversation ON messages(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
+CREATE INDEX IF NOT EXISTS idx_messages_conversation_timestamp_desc
+    ON messages (conversation_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_org_updated_desc
+    ON conversations (organization_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_conversations_org_phone
+    ON conversations (organization_id, phone);
 
 INSERT INTO organizations (name, bot_name, system_prompt)
 SELECT
-    'Default Organization',
+    'Tekisho Infotech',
     'Company Assistant',
     'You are an AI assistant for the company. Answer only using company information. Never invent information. Keep responses short for WhatsApp. Prefer bullet points.'
 WHERE NOT EXISTS (SELECT 1 FROM organizations LIMIT 1);

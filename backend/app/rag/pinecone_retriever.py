@@ -3,24 +3,23 @@
 from __future__ import annotations
 
 import logging
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID
 
 from pinecone import Pinecone
 
 from app.core.config import Settings
+from app.core.logging_config import wa_log
 from app.rag.embeddings import EmbeddingService
-from app.rag.namespace_router import (
-    DEFAULT_NAMESPACE,
-    namespaces_for_query,
-    parse_namespace_list,
-)
+from app.rag.namespace_router import parse_namespace_list
+from app.rag.query_router import route_query
 
 logger = logging.getLogger(__name__)
 
 
 class PineconeRetriever:
-    """Query an existing Pinecone index across Tekisho + product namespaces."""
+    """Query an existing Pinecone index with intent-based namespace routing."""
 
     def __init__(self, settings: Settings, embedding_service: EmbeddingService) -> None:
         if not settings.pinecone_api_key:
@@ -29,14 +28,14 @@ class PineconeRetriever:
         self._embeddings = embedding_service
         self._top_k = settings.rag_top_k
         self._text_field = settings.pinecone_text_metadata_key
+        self._namespace_list_raw = settings.pinecone_namespaces
 
-        # Single-namespace override (legacy) wins over multi-namespace list
         if settings.pinecone_namespace.strip():
             self._all_namespaces = [settings.pinecone_namespace.strip()]
         else:
             configured = parse_namespace_list(settings.pinecone_namespaces)
             self._all_namespaces = configured or [
-                DEFAULT_NAMESPACE,
+                "__default__",
                 "vocalq",
                 "leadq",
                 "emailq",
@@ -74,20 +73,18 @@ class PineconeRetriever:
         namespace: str,
         top_k: int,
     ) -> list[dict]:
-        kwargs: dict = {
-            "vector": vector,
-            "top_k": top_k,
-            "include_metadata": True,
-            "namespace": namespace,
-        }
-        response = self._index.query(**kwargs)
+        response = self._index.query(
+            vector=vector,
+            top_k=top_k,
+            include_metadata=True,
+            namespace=namespace,
+        )
         chunks: list[dict] = []
         for match in response.matches:
             text = self._extract_text(match.metadata or {})
             if not text:
                 continue
-            # Label product namespaces so the LLM knows which product the chunk is about
-            if namespace != DEFAULT_NAMESPACE:
+            if namespace != "__default__":
                 text = f"[{namespace}] {text}"
             chunks.append(
                 {
@@ -105,24 +102,21 @@ class PineconeRetriever:
         top_k: int | None = None,
     ) -> list[dict]:
         del organization_id
-
         limit = top_k or self._top_k
-        target_namespaces = namespaces_for_query(query, self._all_namespaces)
 
+        route = route_query(query, self._all_namespaces)
+        target_namespaces = list(route.namespaces)
         if len(self._all_namespaces) == 1:
             target_namespaces = self._all_namespaces
 
-        logger.debug(
-            "Pinecone RAG query namespaces=%s (configured=%s)",
-            target_namespaces,
-            self._all_namespaces,
-        )
+        t0 = time.perf_counter()
+        vector = self._embeddings.embed_text(route.embed_query)
+        t_embed = time.perf_counter() - t0
 
-        vector = self._embeddings.embed_text(query)
         per_ns_k = limit
-
         merged: list[dict] = []
         workers = min(4, len(target_namespaces))
+        t_q = time.perf_counter()
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = {
                 pool.submit(self._query_namespace, vector, ns, per_ns_k): ns
@@ -130,6 +124,7 @@ class PineconeRetriever:
             }
             for future in as_completed(futures):
                 merged.extend(future.result())
+        t_query = time.perf_counter() - t_q
 
         merged.sort(key=lambda c: c["similarity"], reverse=True)
 
@@ -144,4 +139,10 @@ class PineconeRetriever:
             if len(unique) >= limit:
                 break
 
+        wa_log(
+            logger,
+            "RAG ROUTE",
+            f"intent={route.intent or 'general'} ns={target_namespaces} "
+            f"embed={t_embed:.2f}s query={t_query:.2f}s chunks={len(unique)}",
+        )
         return unique

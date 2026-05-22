@@ -25,15 +25,22 @@ async def lifespan(app: FastAPI):
         "META CALLBACK URL",
         "https://YOUR-NGROK-HOST/webhook OR /api/v1/webhook (both work)",
     )
-    wa_log(logger, "WAITING", "Real chats appear as: [WHATSAPP] INBOUND POST → USER MESSAGE → REPLY SENT")
+    wa_log(logger, "WAITING", "Real chats appear as: [WHATSAPP] INBOUND POST -> USER MESSAGE -> REPLY SENT")
     wa_log(logger, "OPENAI MODEL", settings.openai_model or "gpt-4o-mini")
 
     async def _warmup() -> None:
         try:
             from app.dependencies import get_rag_service
 
+            s = get_settings()
+            if s.rag_provider.lower() == "pinecone" and not s.pinecone_host.strip():
+                wa_log(
+                    logger,
+                    "WARMUP HINT",
+                    "Add PINECONE_HOST to .env to skip slow describe_index on each deploy",
+                )
             await asyncio.to_thread(get_rag_service().retrieve_context, "warmup")
-            wa_log(logger, "WARMUP OK", "Pinecone + embeddings ready")
+            wa_log(logger, "WARMUP OK", "Pinecone + embeddings ready (singleton cached)")
         except Exception as exc:
             wa_log(logger, "WARMUP SKIP", str(exc)[:120])
 

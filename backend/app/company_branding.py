@@ -29,14 +29,20 @@ OFFICE_ADDRESS = (
     "Gachibowli Road, Raidurg, Hyderabad, Telangana - 500032"
 )
 
-# Placeholder name from DB migration — treat as unset so COMPANY_NAME below is used
-_DEFAULT_ORG_PLACEHOLDER = "Tekisho infotech"
+# DB migration seed names — treat as unset so COMPANY_NAME below is used
+_DB_NAME_PLACEHOLDERS = frozenset(
+    {
+        "default organization",
+        "default org",
+        "company assistant",
+    }
+)
 
 
 def resolve_company_name(db_name: str | None = None, env_name: str | None = None) -> str:
     """Display name: real DB name → company_branding.py → env → fallback."""
     n = (db_name or "").strip()
-    if n and n.lower() != _DEFAULT_ORG_PLACEHOLDER:
+    if n and n.lower() not in _DB_NAME_PLACEHOLDERS:
         return n
     if (COMPANY_NAME or "").strip():
         return COMPANY_NAME.strip()

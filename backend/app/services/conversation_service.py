@@ -38,7 +38,7 @@ class ConversationService:
         org_id = self._org_id_str()
         existing = (
             self._db.table("conversations")
-            .select("*")
+            .select("id,organization_id,phone,status,created_at,updated_at")
             .eq("organization_id", org_id)
             .eq("phone", phone)
             .limit(1)
@@ -53,6 +53,17 @@ class ConversationService:
             .execute()
         )
         return created.data[0]
+
+    def has_messages(self, conversation_id: UUID) -> bool:
+        """Indexed lookup — O(1) with limit 1 (for first-message greeting)."""
+        result = (
+            self._db.table("messages")
+            .select("id")
+            .eq("conversation_id", str(conversation_id))
+            .limit(1)
+            .execute()
+        )
+        return bool(result.data)
 
     def count_messages(self, conversation_id: UUID) -> int:
         result = (

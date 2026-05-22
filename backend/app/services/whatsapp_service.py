@@ -53,6 +53,7 @@ class WhatsAppService:
     def __init__(self, settings: Settings) -> None:
         self._token = settings.whatsapp_access_token
         self._phone_id = settings.whatsapp_phone_number_id
+        self._client = httpx.AsyncClient(timeout=20.0)
 
     def _headers(self) -> dict:
         return {
@@ -66,15 +67,14 @@ class WhatsAppService:
                 "WHATSAPP_ACCESS_TOKEN and WHATSAPP_PHONE_NUMBER_ID must be set in backend/.env"
             )
         url = f"{self.BASE_URL}/{self._phone_id}/messages"
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, json=payload, headers=self._headers())
-            if response.is_success:
-                return response.json()
-            raise httpx.HTTPStatusError(
-                format_graph_api_error(response),
-                request=response.request,
-                response=response,
-            )
+        response = await self._client.post(url, json=payload, headers=self._headers())
+        if response.is_success:
+            return response.json()
+        raise httpx.HTTPStatusError(
+            format_graph_api_error(response),
+            request=response.request,
+            response=response,
+        )
 
     async def send_template(
         self,

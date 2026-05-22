@@ -30,6 +30,7 @@ class LLMService:
             "model": self._model,
             "messages": messages,
             "temperature": 0.2,
+            "timeout": 25.0,
         }
         if self._max_tokens > 0:
             kwargs["max_tokens"] = self._max_tokens

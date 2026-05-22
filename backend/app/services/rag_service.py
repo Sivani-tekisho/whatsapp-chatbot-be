@@ -11,11 +11,13 @@ from app.rag.retriever_factory import get_retriever
 
 
 class RAGService:
-    def __init__(self, db: Client, settings: Settings) -> None:
-        embeddings = EmbeddingService(settings)
+    def __init__(
+        self, db: Client, settings: Settings, embeddings: EmbeddingService | None = None
+    ) -> None:
+        emb = embeddings or EmbeddingService(settings)
         self._db = db
         self._settings = settings
-        self._retriever = get_retriever(db, settings, embeddings)
+        self._retriever = get_retriever(db, settings, emb)
         self._top_k = settings.rag_top_k
         self._org_id = settings.default_organization_id
         self._provider = settings.rag_provider.lower()

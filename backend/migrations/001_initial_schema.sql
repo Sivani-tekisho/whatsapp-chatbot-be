@@ -95,7 +95,7 @@ $$;
 -- Default organization for single-tenant mode (run once)
 INSERT INTO organizations (name, bot_name, system_prompt)
 SELECT
-    'Default Organization',
+    'Tekisho Infotech',
     'Company Assistant',
     'You are an AI assistant for the company. Answer only using company information. Never invent information. Keep responses short for WhatsApp. Prefer bullet points.'
 WHERE NOT EXISTS (SELECT 1 FROM organizations LIMIT 1);

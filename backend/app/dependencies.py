@@ -13,6 +13,7 @@ from app.services.memory_service import MemoryService
 from app.services.message_processor import MessageProcessor
 from app.services.prompt_service import PromptService, get_prompt_service
 from app.services.rag_service import RAGService
+from app.services.response_cache import ResponseCacheService
 from app.services.whatsapp_service import WhatsAppService
 
 
@@ -34,36 +35,46 @@ def get_memory_service(settings: Settings | None = None) -> MemoryService:
     return MemoryService(get_supabase_client(), settings or get_settings())
 
 
-def get_rag_service(settings: Settings | None = None) -> RAGService:
-    return RAGService(get_supabase_client(), settings or get_settings())
+@lru_cache
+def get_rag_service() -> RAGService:
+    return RAGService(get_supabase_client(), get_settings(), get_embedding_service())
 
 
-def get_llm_service(settings: Settings | None = None) -> LLMService:
-    return LLMService(settings or get_settings())
+@lru_cache
+def get_llm_service() -> LLMService:
+    return LLMService(get_settings())
 
 
-def get_whatsapp_service(settings: Settings | None = None) -> WhatsAppService:
-    return WhatsAppService(settings or get_settings())
+@lru_cache
+def get_whatsapp_service() -> WhatsAppService:
+    return WhatsAppService(get_settings())
 
 
-def get_company_agent(settings: Settings | None = None) -> CompanyAgent:
-    s = settings or get_settings()
+@lru_cache
+def get_response_cache() -> ResponseCacheService:
+    return ResponseCacheService(get_settings())
+
+
+@lru_cache
+def get_company_agent() -> CompanyAgent:
+    s = get_settings()
     return CompanyAgent(
         settings=s,
-        rag_service=get_rag_service(s),
-        llm_service=get_llm_service(s),
+        rag_service=get_rag_service(),
+        llm_service=get_llm_service(),
         prompt_service=get_prompt_service(),
         memory_service=get_memory_service(s),
+        response_cache=get_response_cache(),
     )
 
 
-def get_message_processor(settings: Settings | None = None) -> MessageProcessor:
-    s = settings or get_settings()
-    db = get_supabase_client()
+@lru_cache
+def get_message_processor() -> MessageProcessor:
+    s = get_settings()
     return MessageProcessor(
-        db=db,
+        db=get_supabase_client(),
         settings=s,
-        agent=get_company_agent(s),
+        agent=get_company_agent(),
         conversation_service=get_conversation_service(s),
-        whatsapp_service=get_whatsapp_service(s),
+        whatsapp_service=get_whatsapp_service(),
     )
