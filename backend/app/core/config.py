@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     # WhatsApp Cloud API
     whatsapp_access_token: str = ""
     whatsapp_phone_number_id: str = ""
+    meta_api_version: str = "v21.0"
+    cors_origins: str = "http://localhost:5173,http://localhost:3000"
     verify_token: str = Field(
         default="",
         validation_alias=AliasChoices("VERIFY_TOKEN", "WEBHOOK_VERIFY_TOKEN"),
@@ -52,8 +54,12 @@ class Settings(BaseSettings):
     pinecone_api_key: str = ""
     pinecone_index_name: str = ""
     pinecone_host: str = ""
-    pinecone_namespace: str = ""
+    pinecone_namespace: str = ""  # single namespace (legacy)
+    pinecone_namespaces: str = ""  # comma-separated list of namespaces
     pinecone_text_metadata_key: str = "text"
+
+    # RAG tuning
+    rag_min_similarity: float = 0.0
 
     # Company branding (overridden by DB settings)
     company_name: str = "Our Company"

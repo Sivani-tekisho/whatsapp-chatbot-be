@@ -6,9 +6,8 @@ from app.core.config import Settings
 
 
 class WhatsAppService:
-    BASE_URL = "https://graph.facebook.com/v21.0"
-
     def __init__(self, settings: Settings) -> None:
+        self._base_url = f"https://graph.facebook.com/{settings.meta_api_version}"
         self._token = settings.whatsapp_access_token
         self._phone_id = settings.whatsapp_phone_number_id
 
@@ -19,7 +18,7 @@ class WhatsAppService:
         }
 
     async def send_text(self, to: str, text: str) -> dict:
-        url = f"{self.BASE_URL}/{self._phone_id}/messages"
+        url = f"{self._base_url}/{self._phone_id}/messages"
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
@@ -33,7 +32,7 @@ class WhatsAppService:
             return response.json()
 
     async def mark_as_read(self, message_id: str) -> None:
-        url = f"{self.BASE_URL}/{self._phone_id}/messages"
+        url = f"{self._base_url}/{self._phone_id}/messages"
         payload = {
             "messaging_product": "whatsapp",
             "status": "read",
